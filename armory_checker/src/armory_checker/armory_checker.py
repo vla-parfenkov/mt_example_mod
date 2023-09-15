@@ -1,6 +1,7 @@
 import math
 
 import BigWorld
+import Math
 import GUI
 from CurrentVehicle import g_currentPreviewVehicle
 from Vehicle import SegmentCollisionResultExt
@@ -8,7 +9,6 @@ from gui.shared.utils.functions import makeTooltip
 from gui.shared.utils.scheduled_notifications import Notifiable, PeriodicNotifier
 
 from helpers import dependency
-from AvatarInputHandler import cameras
 from items import vehicles
 from skeletons.gui.app_loader import IAppLoader
 from skeletons.gui.shared.utils import IHangarSpace
@@ -17,6 +17,8 @@ from vehicle_systems.tankStructure import TankPartIndexes
 
 
 class ArmoryCheckerService(object):
+
+    # dependency injection
     __hangarSpace = dependency.descriptor(IHangarSpace)
     __appLoader = dependency.descriptor(IAppLoader)
 
@@ -92,13 +94,21 @@ class ArmoryCheckerService(object):
         self.__notificatorManager.stopNotification()
 
     def __checkCollision(self):
+        """
+        Ищем коллизии с танком
+        """
+
+        # курсор на экране, в фокусе и над 3д сценой
         cursorPosition = GUI.mcursor().position if (GUI.mcursor().inWindow and GUI.mcursor().inFocus and
                                                     self.__hangarSpace.isCursorOver3DScene) else None
+
         if self.__currentCursorPos != cursorPosition:
             self.__currentCollisions = []
-            ray, wpoint = cameras.getWorldRayAndPoint(cursorPosition.x, cursorPosition.y)
+            ray, wpoint = _getWorldRayAndPoint(cursorPosition.x, cursorPosition.y)
             vehicle = BigWorld.entities[g_currentPreviewVehicle.vehicleEntityID]
             if vehicle.appearance.collisions is not None:
+                # collideAllWorld does the collision test with an attachment in the world space
+                # returns all collisions (dist, rayAngleCos, matkind, partIndex)
                 collisions = vehicle.appearance.collisions.collideAllWorld(wpoint, wpoint + ray * 500)
                 if collisions:
                     for collision in collisions:
@@ -116,26 +126,30 @@ class ArmoryCheckerService(object):
         self.__currentCursorPos = cursorPosition
 
 
-def getMatinfo(entity, parIndex, matKind):
+def getMatinfo(entity, partIndex, matKind):
+    """
+    :param entity:  vehicle entity
+    :param parIndex: Vehicle part index
+    :param matKind: id material
+    :return:
+    """
     matInfo = None
 
-    if parIndex == TankPartIndexes.CHASSIS:
+    if partIndex == TankPartIndexes.CHASSIS:
         matInfo = entity.typeDescriptor.chassis.materials.get(matKind)
-    elif parIndex == TankPartIndexes.HULL:
+    elif partIndex == TankPartIndexes.HULL:
         matInfo = entity.typeDescriptor.hull.materials.get(matKind)
-    elif parIndex == TankPartIndexes.TURRET:
+    elif partIndex == TankPartIndexes.TURRET:
         matInfo = entity.typeDescriptor.turret.materials.get(matKind)
-    elif parIndex == TankPartIndexes.GUN:
+    elif partIndex == TankPartIndexes.GUN:
         matInfo = entity.typeDescriptor.gun.materials.get(matKind)
-    elif parIndex > len(TankPartIndexes.ALL):
-        trackPairIdx = collisionIdxToTrackPairIdx(parIndex, entity.typeDescriptor)
+    elif partIndex > len(TankPartIndexes.ALL):
+        trackPairIdx = collisionIdxToTrackPairIdx(partIndex, entity.typeDescriptor)
         if trackPairIdx is not None:
             matInfo = entity.typeDescriptor.chassis.tracks[trackPairIdx].materials.get(matKind)
     elif entity.typeDescriptor.type.isWheeledVehicle and entity.appearance.collisions is not None:
-        wheelName = entity.appearance.collisions.getPartName(parIndex)
+        wheelName = entity.appearance.collisions.getPartName(partIndex)
         if wheelName is not None:
-            # procedurally generated wheels have no material,
-            # but they are monolithic and their armor is specified in wheel config
             matInfo = entity.typeDescriptor.chassis.wheelsArmor.get(wheelName, None)
 
     if matInfo is None:
@@ -146,34 +160,40 @@ def getMatinfo(entity, parIndex, matKind):
 
 
 def _computePenetrationArmor(hitAngleCos, matInfo):
-    # Returns the armor thickness that the shell should penetrate
-    # Replicates the logic from the _getHitAngleCosWithNormalization() function in the cell/VehicleHarm.py
+    """
+    Calculate penetration armor
+    :param hitAngleCos: cosinus betwen ray(hit) and armor
+    :param matInfo: Material info structure
+    :return: penetration armor
+    """
     armor = matInfo.armor
 
     if not matInfo.useHitAngle:
         return armor
 
-    normalizationAngle = 0.0
-    #shellExtraData = cls._SHELL_EXTRA_DATA[shell.kind]
-    #if shellExtraData.hasNormalization:
-    #    normalizationAngle = cls.__sessionProvider.arenaVisitor.modifiers.getShellNormalization(shell.kind)
-    if normalizationAngle > 0.0 and hitAngleCos < 1.0:
-        #if matInfo.checkCaliberForHitAngleNorm:
-            #if shell.caliber > armor * 2 > 0:  # Apply the 2-caliber rule
-            #    normalizationAngle *= 1.4 * shell.caliber / (armor * 2)  # from the task WOTD-11842
-
-        hitAngle = math.acos(hitAngleCos) - normalizationAngle
-        if hitAngle < 0.0:
-            hitAngleCos = 1.0
-        else:
-            if hitAngle > math.pi / 2.0 - 1e-5:
-                hitAngle = math.pi / 2.0 - 1e-5
-
-            hitAngleCos = math.cos(hitAngle)
-
     if hitAngleCos < 1e-5:
         hitAngleCos = 1e-5
 
     return armor / hitAngleCos
+
+
+def _getWorldRayAndPoint(x, y):
+    """
+    Get world ray and point on near plane of camera
+    """
+    fov = BigWorld.projection().fov  # Field of view (angle in rad)
+    near = BigWorld.projection().nearPlane  # Distance from camera to near plane
+    aspect = BigWorld.getAspectRatio()
+    yLength = near * math.tan(fov * 0.5)
+    xLength = yLength * aspect
+
+    # point on near plane
+    point = Math.Vector3(xLength * x, yLength * y, near)
+
+    inv = Math.Matrix(BigWorld.camera().invViewMatrix)
+    ray = inv.applyVector(point)
+    wPoint = inv.applyPoint(point)
+    return ray, wPoint
+
 
 g_ACService = ArmoryCheckerService()
