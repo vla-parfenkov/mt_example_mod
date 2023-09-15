@@ -9,7 +9,7 @@
 
 На момент написания, он не находился в списке запрещённых,
 ни в Мире Танков, ни в World of Tanks:
-https://tanki.su/ru/content/guide/ban/nonusefulmods/
+https://lesta.ru/support/ru/products/wot/article/15152/
 https://eu.wargaming.net/support/ru/products/wot/article/15152/
 
 ![image](https://github.com/vla-parfenkov/mt_example_mod/assets/26526836/db92b130-688f-40cd-a5fb-7ce6d077d9ac)
